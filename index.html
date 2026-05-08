@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="소설 리더">
+<meta name="theme-color" content="#9b6f2f">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<title>소설 리더</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f4ede2;
+  --text: #2b1f0e;
+  --accent: #9b6f2f;
+  --surface: #e8ddd0;
+  --border: #c9aa7c;
+  --muted: #8a7560;
+  --font-size: 18px;
+  --line-height: 2.0;
+  --letter-spacing: 0.025em;
+}
+[data-theme="dark"] {
+  --bg: #161412;
+  --text: #c8baa8;
+  --accent: #c4a35a;
+  --surface: #201d1a;
+  --border: #332e27;
+  --muted: #6e6358;
+}
+[data-theme="light"] {
+  --bg: #f9f8f6;
+  --text: #1a1a1a;
+  --accent: #4a6580;
+  --surface: #f0eeeb;
+  --border: #ddd9d3;
+  --muted: #888;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Noto Serif KR', 'Georgia', serif;
+  background: var(--bg);
+  color: var(--text);
+  transition: background 0.4s ease, color 0.4s ease;
+  min-height: 100vh;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ── 상단 진행 바 ── */
+#progress-bar {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), #e0b870);
+  transform-origin: left;
+  transform: scaleX(0);
+  transition: transform 0.15s ease;
+  z-index: 300;
+}
+
+/* ── 상단 툴바 ── */
+#toolbar {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 200;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: transform 0.35s cubic-bezier(0.4,0,0.2,1), opacity 0.35s ease;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+#toolbar.hide { transform: translateY(-110%); opacity: 0; }
+#filename {
+  flex: 1;
+  font-size: 14px;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.03em;
+}
+.tbtn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.2s, border-color 0.2s;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.tbtn:active { background: var(--border); }
+
+/* ── 메인 콘텐츠 ── */
+#content {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 80px 22px 120px;
+}
+
+/* ── 시작 화면 ── */
+#welcome {
+  min-height: 75vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 20px;
+  animation: fadeIn 0.8s ease;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+
+#welcome .icon { font-size: 52px; line-height: 1; opacity: 0.85; }
+#welcome h1 {
+  font-size: 26px; font-weight: 700;
+  letter-spacing: -0.02em; color: var(--accent);
+}
+#welcome .desc { font-size: 15px; color: var(--muted); line-height: 1.8; }
+.upload-btn {
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 14px;
+  padding: 15px 36px;
+  font-size: 16px;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: opacity 0.2s, transform 0.15s;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+.upload-btn:active { opacity: 0.8; transform: scale(0.97); }
+.upload-hint { font-size: 12.5px; color: var(--muted); line-height: 1.7; opacity: 0.75; }
+#file-input { display: none; }
+
+/* ── 텍스트 표시 ── */
+#text-display { display: none; animation: fadeIn 0.5s ease; }
+#text-display p {
+  font-size: var(--font-size);
+  line-height: var(--line-height);
+  letter-spacing: var(--letter-spacing);
+  word-break: keep-all;
+  word-wrap: break-word;
+  margin-bottom: 0.6em;
+  text-indent: 1em;
+}
+#text-display p.blank { height: 0.6em; margin: 0; }
+
+/* ── 하단 상태 바 ── */
+#reading-bar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 10px 16px;
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 200;
+  transition: transform 0.35s cubic-bezier(0.4,0,0.2,1), opacity 0.35s ease;
+}
+#reading-bar.show { display: flex; }
+#reading-bar.hide { transform: translateY(110%); opacity: 0; }
+#progress-txt { font-size: 13px; color: var(--accent); font-weight: 700; letter-spacing: 0.05em; }
+#char-info { font-size: 12px; color: var(--muted); }
+
+/* ── 설정 패널 ── */
+#settings-panel {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--surface);
+  border-top: 2px solid var(--border);
+  border-radius: 20px 20px 0 0;
+  padding: 20px 20px 48px;
+  z-index: 250;
+  transform: translateY(100%);
+  transition: transform 0.4s cubic-bezier(0.4,0,0.2,1);
+  box-shadow: 0 -8px 40px rgba(0,0,0,0.18);
+}
+#settings-panel.open { transform: translateY(0); }
+.panel-handle {
+  width: 40px; height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  margin: 0 auto 20px;
+}
+.panel-title { font-size: 13px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 18px; }
+.setting-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 0; border-bottom: 1px solid var(--border);
+}
+.setting-row:last-child { border-bottom: none; }
+.setting-label { font-size: 14px; letter-spacing: 0.02em; }
+.ctrl-group { display: flex; align-items: center; gap: 10px; }
+.ctrl-btn {
+  width: 38px; height: 38px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); font-size: 20px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.2s; line-height: 1; font-family: inherit;
+}
+.ctrl-btn:active { background: var(--border); }
+.ctrl-val { min-width: 38px; text-align: center; font-size: 14px; color: var(--accent); font-weight: 700; }
+.theme-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.theme-pill {
+  padding: 8px 18px; border-radius: 20px;
+  border: 1.5px solid var(--border);
+  font-size: 13px; cursor: pointer; font-family: inherit;
+  letter-spacing: 0.03em; transition: all 0.2s;
+}
+.theme-pill.sepia  { background: #f4ede2; color: #2b1f0e; }
+.theme-pill.dark   { background: #161412; color: #c8baa8; }
+.theme-pill.light  { background: #f9f8f6; color: #1a1a1a; }
+.theme-pill.active { border-color: var(--accent); border-width: 2px; }
+
+/* ── 오버레이 ── */
+#overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+  z-index: 240; display: none; backdrop-filter: blur(2px);
+}
+#overlay.show { display: block; }
+
+/* ── 반응형 ── */
+@media (min-width: 580px) { #content { padding: 80px 44px 120px; } }
+@media (min-width: 820px) { #content { max-width: 840px; padding: 80px 80px 120px; } }
+</style>
+</head>
+<body>
+
+<div id="progress-bar"></div>
+
+<div id="toolbar">
+  <span id="filename">소설 리더</span>
+  <button class="tbtn" id="settings-btn">설정</button>
+  <button class="tbtn" onclick="document.getElementById('file-input').click()">열기</button>
+  <input type="file" id="file-input" accept=".txt">
+</div>
+
+<div id="content">
+  <div id="welcome">
+    <div class="icon">📖</div>
+    <h1>소설 리더</h1>
+    <p class="desc">광고 없이, 내 설정 그대로<br>편하게 읽는 소설 전용 리더</p>
+    <button class="upload-btn" onclick="document.getElementById('file-input').click()">
+      파일 불러오기
+    </button>
+    <p class="upload-hint">
+      구글 드라이브에서 다운로드한<br>
+      .txt 파일을 열 수 있어요<br><br>
+      마지막 읽은 위치를 자동으로 기억해요
+    </p>
+  </div>
+  <div id="text-display"></div>
+</div>
+
+<div id="reading-bar">
+  <span id="progress-txt">0%</span>
+  <span id="char-info"></span>
+</div>
+
+<div id="overlay"></div>
+<div id="settings-panel">
+  <div class="panel-handle"></div>
+  <div class="panel-title">읽기 설정</div>
+  <div class="setting-row">
+    <span class="setting-label">글자 크기</span>
+    <div class="ctrl-group">
+      <button class="ctrl-btn" onclick="adjustFont(-1)">−</button>
+      <span class="ctrl-val" id="font-val">18</span>
+      <button class="ctrl-btn" onclick="adjustFont(1)">+</button>
+    </div>
+  </div>
+  <div class="setting-row">
+    <span class="setting-label">줄 간격</span>
+    <div class="ctrl-group">
+      <button class="ctrl-btn" onclick="adjustLine(-0.1)">−</button>
+      <span class="ctrl-val" id="line-val">2.0</span>
+      <button class="ctrl-btn" onclick="adjustLine(0.1)">+</button>
+    </div>
+  </div>
+  <div class="setting-row">
+    <span class="setting-label">테마</span>
+    <div class="theme-row">
+      <button class="theme-pill sepia active" onclick="setTheme('sepia',this)">세피아</button>
+      <button class="theme-pill dark"  onclick="setTheme('dark',this)">다크</button>
+      <button class="theme-pill light" onclick="setTheme('light',this)">라이트</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── 상태 ── */
+let fs = 18, lh = 2.0, theme = 'sepia';
+let toolbarOn = true, settingsOn = false;
+let lastTap = 0, scrollTimer, currentFile = '';
+
+/* ── 설정 로드/저장 ── */
+function loadSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem('nr-cfg') || '{}');
+    fs = s.fs || 18; lh = s.lh || 2.0; theme = s.theme || 'sepia';
+  } catch(e) {}
+  applyAll();
+}
+function saveSettings() {
+  try { localStorage.setItem('nr-cfg', JSON.stringify({fs, lh, theme})); } catch(e) {}
+}
+function applyAll() {
+  const r = document.documentElement;
+  r.style.setProperty('--font-size', fs + 'px');
+  r.style.setProperty('--line-height', lh);
+  document.getElementById('font-val').textContent = fs;
+  document.getElementById('line-val').textContent = lh.toFixed(1);
+  document.body.removeAttribute('data-theme');
+  if (theme !== 'sepia') document.body.setAttribute('data-theme', theme);
+  document.querySelectorAll('.theme-pill').forEach(b => {
+    b.classList.toggle('active', b.classList.contains(theme));
+  });
+}
+
+/* ── 글자/줄간격 조절 ── */
+function adjustFont(d) { fs = Math.max(12, Math.min(30, fs+d)); applyAll(); saveSettings(); }
+function adjustLine(d) { lh = Math.round((lh+d)*10)/10; lh = Math.max(1.3, Math.min(3.0, lh)); applyAll(); saveSettings(); }
+function setTheme(t) { theme = t; applyAll(); saveSettings(); }
+
+/* ── 파일 읽기 ── */
+document.getElementById('file-input').addEventListener('change', function(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = ev => renderText(ev.target.result, f.name);
+  r.readAsText(f, 'UTF-8');
+  e.target.value = '';
+});
+
+function renderText(raw, name) {
+  currentFile = name;
+  document.getElementById('filename').textContent = name.replace(/\.txt$/i, '');
+  const paragraphs = raw.replace(/\r\n/g, '\n').split(/\n{2,}/);
+  let html = '';
+  for (const para of paragraphs) {
+    const lines = para.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) { html += '<p class="blank"></p>'; }
+    else { html += '<p>' + lines.map(escHtml).join('<br>') + '</p>'; }
+  }
+  const disp = document.getElementById('text-display');
+  disp.innerHTML = html;
+  document.getElementById('welcome').style.display = 'none';
+  disp.style.display = 'block';
+  const bar = document.getElementById('reading-bar');
+  bar.classList.add('show'); bar.classList.remove('hide');
+  document.getElementById('char-info').textContent = '총 ' + raw.length.toLocaleString() + '자';
+  try {
+    const saved = localStorage.getItem('np-' + encodeURIComponent(name));
+    if (saved) setTimeout(() => window.scrollTo(0, parseInt(saved)), 120);
+    else window.scrollTo(0, 0);
+  } catch(e) { window.scrollTo(0, 0); }
+  closeSettings();
+}
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* ── 스크롤 ── */
+window.addEventListener('scroll', () => {
+  const scrollTop = window.scrollY;
+  const total = document.documentElement.scrollHeight - window.innerHeight;
+  const ratio = total > 0 ? scrollTop / total : 0;
+  document.getElementById('progress-bar').style.transform = `scaleX(${ratio})`;
+  document.getElementById('progress-txt').textContent = Math.round(ratio * 100) + '%';
+  clearTimeout(scrollTimer);
+  scrollTimer = setTimeout(() => {
+    if (currentFile) {
+      try { localStorage.setItem('np-' + encodeURIComponent(currentFile), scrollTop); } catch(e) {}
+    }
+  }, 400);
+}, { passive: true });
+
+/* ── 탭 → 툴바 토글 ── */
+document.addEventListener('click', e => {
+  if (e.target.closest('#toolbar, #settings-panel, #overlay, button, .upload-btn')) return;
+  const now = Date.now();
+  if (now - lastTap < 250) return;
+  lastTap = now;
+  if (settingsOn) { closeSettings(); return; }
+  toolbarOn = !toolbarOn;
+  document.getElementById('toolbar').classList.toggle('hide', !toolbarOn);
+  const rb = document.getElementById('reading-bar');
+  if (rb.classList.contains('show')) rb.classList.toggle('hide', !toolbarOn);
+});
+
+/* ── 설정 패널 ── */
+document.getElementById('settings-btn').addEventListener('click', e => { e.stopPropagation(); openSettings(); });
+document.getElementById('overlay').addEventListener('click', closeSettings);
+function openSettings() { settingsOn = true; document.getElementById('settings-panel').classList.add('open'); document.getElementById('overlay').classList.add('show'); }
+function closeSettings() { settingsOn = false; document.getElementById('settings-panel').classList.remove('open'); document.getElementById('overlay').classList.remove('show'); }
+
+/* ── Service Worker 등록 ── */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
+}
+
+/* ── 초기화 ── */
+loadSettings();
+</script>
+</body>
+</html>
