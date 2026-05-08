@@ -1,4 +1,4 @@
-const CACHE = 'novel-reader-v1';
+const CACHE = 'novel-reader-v2';
 const ASSETS = ['./index.html', './manifest.json'];
 
 self.addEventListener('install', e => {

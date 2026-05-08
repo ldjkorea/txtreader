@@ -232,12 +232,39 @@ body {
 }
 #overlay.show { display: block; }
 
+/* ── 로딩 스피너 ── */
+#loading {
+  display: none;
+  position: fixed; inset: 0;
+  background: var(--bg);
+  z-index: 400;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+#loading.show { display: flex; }
+.spinner {
+  width: 36px; height: 36px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading-msg { font-size: 14px; color: var(--muted); letter-spacing: 0.04em; }
+
 /* ── 반응형 ── */
 @media (min-width: 580px) { #content { padding: 80px 20px 120px; } }
 @media (min-width: 820px) { #content { max-width: 840px; padding: 80px 40px 120px; } }
 </style>
 </head>
 <body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <span id="loading-msg">불러오는 중...</span>
+</div>
 
 <div id="progress-bar"></div>
 
@@ -339,9 +366,14 @@ function setTheme(t) { theme = t; applyAll(); saveSettings(); }
 document.getElementById('file-input').addEventListener('change', function(e) {
   const f = e.target.files[0];
   if (!f) return;
-  const r = new FileReader();
-  r.onload = ev => renderText(ev.target.result, f.name);
-  r.readAsText(f, 'UTF-8');
+  const mb = (f.size / 1024 / 1024).toFixed(1);
+  document.getElementById('loading-msg').textContent = `${f.name} (${mb}MB) 불러오는 중...`;
+  document.getElementById('loading').classList.add('show');
+  setTimeout(() => {
+    const r = new FileReader();
+    r.onload = ev => renderText(ev.target.result, f.name);
+    r.readAsText(f, 'UTF-8');
+  }, 30);
   e.target.value = '';
 });
 
@@ -382,9 +414,10 @@ function renderText(raw, name) {
     disp.appendChild(frag);
     idx = end;
 
-    // 첫 청크 완료 후 스크롤 위치 복원
+    // 첫 청크 완료 후 스크롤 위치 복원 + 로딩 숨김
     if (!scrollRestored && idx >= Math.min(CHUNK, paragraphs.length)) {
       scrollRestored = true;
+      document.getElementById('loading').classList.remove('show');
       try {
         const saved = localStorage.getItem('np-' + encodeURIComponent(name));
         if (saved) setTimeout(() => window.scrollTo(0, parseInt(saved)), 80);
