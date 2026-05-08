@@ -10,8 +10,6 @@
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <title>소설 리더</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root {
   --bg: #f4ede2;
@@ -45,7 +43,7 @@
 html { scroll-behavior: smooth; }
 
 body {
-  font-family: 'Noto Serif KR', 'Georgia', serif;
+  font-family: 'Noto Serif', 'Nanum Myeongjo', 'Batang', 'Georgia', serif;
   background: var(--bg);
   color: var(--text);
   transition: background 0.4s ease, color 0.4s ease;
@@ -157,6 +155,8 @@ body {
   word-wrap: break-word;
   margin-bottom: 0.6em;
   text-indent: 1em;
+  content-visibility: auto;
+  contain-intrinsic-size: 0 3em;
 }
 #text-display p.blank { height: 0.6em; margin: 0; }
 
@@ -348,26 +348,60 @@ document.getElementById('file-input').addEventListener('change', function(e) {
 function renderText(raw, name) {
   currentFile = name;
   document.getElementById('filename').textContent = name.replace(/\.txt$/i, '');
-  const paragraphs = raw.replace(/\r\n/g, '\n').split(/\n{2,}/);
-  let html = '';
-  for (const para of paragraphs) {
-    const lines = para.split('\n').map(l => l.trim()).filter(Boolean);
-    if (!lines.length) { html += '<p class="blank"></p>'; }
-    else { html += '<p>' + lines.map(escHtml).join('<br>') + '</p>'; }
-  }
+
   const disp = document.getElementById('text-display');
-  disp.innerHTML = html;
+  disp.innerHTML = '';
   document.getElementById('welcome').style.display = 'none';
   disp.style.display = 'block';
   document.getElementById('open-btn').style.display = '';
   const bar = document.getElementById('reading-bar');
   bar.classList.add('show'); bar.classList.remove('hide');
   document.getElementById('char-info').textContent = '총 ' + raw.length.toLocaleString() + '자';
-  try {
-    const saved = localStorage.getItem('np-' + encodeURIComponent(name));
-    if (saved) setTimeout(() => window.scrollTo(0, parseInt(saved)), 120);
-    else window.scrollTo(0, 0);
-  } catch(e) { window.scrollTo(0, 0); }
+
+  // 단락 파싱
+  const paragraphs = raw.replace(/\r\n/g, '\n').split(/\n{2,}/);
+
+  // 청크 렌더링 - 한번에 150단락씩, 나머지는 requestIdleCallback으로
+  const CHUNK = 150;
+  let idx = 0;
+  let scrollRestored = false;
+
+  function renderChunk() {
+    const frag = document.createDocumentFragment();
+    const end = Math.min(idx + CHUNK, paragraphs.length);
+    for (let i = idx; i < end; i++) {
+      const lines = paragraphs[i].split('\n').map(l => l.trim()).filter(Boolean);
+      const p = document.createElement('p');
+      if (!lines.length) {
+        p.className = 'blank';
+      } else {
+        p.innerHTML = lines.map(escHtml).join('<br>');
+      }
+      frag.appendChild(p);
+    }
+    disp.appendChild(frag);
+    idx = end;
+
+    // 첫 청크 완료 후 스크롤 위치 복원
+    if (!scrollRestored && idx >= Math.min(CHUNK, paragraphs.length)) {
+      scrollRestored = true;
+      try {
+        const saved = localStorage.getItem('np-' + encodeURIComponent(name));
+        if (saved) setTimeout(() => window.scrollTo(0, parseInt(saved)), 80);
+        else window.scrollTo(0, 0);
+      } catch(e) { window.scrollTo(0, 0); }
+    }
+
+    if (idx < paragraphs.length) {
+      if (typeof requestIdleCallback !== 'undefined') {
+        requestIdleCallback(renderChunk, { timeout: 200 });
+      } else {
+        setTimeout(renderChunk, 0);
+      }
+    }
+  }
+
+  requestAnimationFrame(renderChunk);
   closeSettings();
 }
 function escHtml(s) {
