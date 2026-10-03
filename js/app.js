@@ -49,7 +49,7 @@ const Meta = {
   books() { try { return JSON.parse(localStorage.getItem('nr-books') || '{}'); } catch(e) { return {}; } },
   saveBooks(b) { try { localStorage.setItem('nr-books', JSON.stringify(b)); return true; } catch(e) { return false; } },
   cfg() {
-    const def = { font: 19, line: 2.0, pad: 16, gap: 0.9, fontFamily: 'serif', weight: 400, theme: 'sepia', brightness: 0, asSpeed: 3 };
+    const def = { font: 19, line: 1.9, pad: 22, gap: 0.7, fontFamily: 'serif', weight: 400, theme: 'sepia', brightness: 0, asSpeed: 3, wrap: 'keep-all' };
     try { return Object.assign(def, JSON.parse(localStorage.getItem('nr-cfg') || '{}')); } catch(e) { return def; }
   },
   saveCfg(c) { try { localStorage.setItem('nr-cfg', JSON.stringify(c)); } catch(e) {} },
@@ -69,6 +69,7 @@ let pendingRestore = null;
 let renderToken = 0;
 let importingFiles = false;
 let lastStorageWarning = 0;
+let progressDragging = false;
 function topOffset() {
   const content = document.getElementById('reader-content');
   const padding = content ? Number.parseFloat(getComputedStyle(content).paddingTop) : NaN;
@@ -83,6 +84,7 @@ function applyCfg() {
   r.style.setProperty('--side-pad', cfg.pad + 'px');
   r.style.setProperty('--para-gap', cfg.gap + 'em');
   r.style.setProperty('--font-weight', cfg.weight);
+  r.style.setProperty('--word-break', cfg.wrap === 'break-all' ? 'break-all' : 'keep-all');
   r.style.setProperty('--body-font', cfg.fontFamily === 'sans'
     ? "-apple-system,'Apple SD Gothic Neo','Noto Sans KR','Malgun Gothic',sans-serif"
     : "'Noto Serif','Nanum Myeongjo','Batang',serif");
@@ -98,6 +100,7 @@ function applyCfg() {
   document.getElementById('brightness-slider').value = cfg.brightness;
   document.querySelectorAll('[data-font]').forEach(b => b.classList.toggle('active', b.dataset.font === cfg.fontFamily));
   document.querySelectorAll('[data-weight]').forEach(b => b.classList.toggle('active', +b.dataset.weight === cfg.weight));
+  document.querySelectorAll('[data-wrap]').forEach(b => b.classList.toggle('active', b.dataset.wrap === cfg.wrap));
   document.querySelectorAll('[data-theme]').forEach(b => b.classList.toggle('active', b.dataset.theme === cfg.theme));
 }
 function setText(id, t) { const el = document.getElementById(id); if (el) el.textContent = t; }
@@ -108,6 +111,24 @@ function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 function escReg(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function fileId(name, size) { return 'b_' + name.replace(/[^a-zA-Z0-9가-힣]/g, '_') + '_' + size; }
 function normalizedText(text) { return String(text || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n'); }
+function splitIntoParagraphs(raw) {
+  const text = normalizedText(raw);
+  const lines = text.split('\n');
+  const nonEmpty = lines.filter(line => line.trim()).length;
+  const blankSeparators = lines.length - nonEmpty;
+  const blankBlocks = text.split(/\n{2,}/);
+
+  // Most modern web-novel TXT files separate paragraphs with blank lines.
+  if (blankBlocks.length >= Math.max(4, Math.floor(nonEmpty * 0.03))) return blankBlocks;
+
+  // Some Korean TXT files use one physical line per paragraph with no blank lines.
+  const lengths = lines.filter(line => line.trim()).map(line => line.trim().length).sort((a,b) => a-b);
+  const median = lengths.length ? lengths[Math.floor(lengths.length / 2)] : 0;
+  if (nonEmpty >= 20 && blankSeparators <= Math.max(2, nonEmpty * 0.02) && median > 0 && median < 90) {
+    return lines.map(line => line.trim() ? line : '');
+  }
+  return blankBlocks;
+}
 async function fingerprintContent(content) {
   const normalized = normalizedText(content);
   if (globalThis.crypto && crypto.subtle && globalThis.TextEncoder) {
@@ -296,14 +317,31 @@ function showBookInfo(id) {
 
 /* TXT 파일 가져오기 */
 const fileInput = document.getElementById('file-input');
-function readFileAsText(file) {
-  if (typeof file.text === 'function') return file.text();
+async function readFileBuffer(file) {
+  if (typeof file.arrayBuffer === 'function') return file.arrayBuffer();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = e => resolve(String(e.target.result || ''));
+    reader.onload = e => resolve(e.target.result);
     reader.onerror = () => reject(reader.error || new Error('파일 읽기 실패'));
-    reader.readAsText(file, 'UTF-8');
+    reader.readAsArrayBuffer(file);
   });
+}
+async function readFileAsText(file) {
+  const buffer = await readFileBuffer(file);
+  const bytes = new Uint8Array(buffer);
+  try {
+    if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+      return new TextDecoder('utf-16le').decode(buffer);
+    }
+    if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+      return new TextDecoder('utf-16be').decode(buffer);
+    }
+    // Fatal UTF-8 decoding lets us reliably fall back for legacy Korean TXT files.
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch(e) {
+    try { return new TextDecoder('euc-kr').decode(buffer); }
+    catch(legacyError) { return new TextDecoder('utf-8').decode(buffer); }
+  }
 }
 
 async function findDuplicateBook(books, fingerprint, size, content) {
@@ -419,7 +457,7 @@ function loadContent(id, name, raw) {
   }
   setText('book-title', name.replace(/\.txt$/i, ''));
 
-  paragraphs = normalizedText(raw).split(/\n{2,}/);
+  paragraphs = splitIntoParagraphs(raw);
   chapters = [];
   pendingRestore = null;
   const savedPos = (Meta.books()[id] || {}).pos || null;
@@ -448,6 +486,11 @@ function loadContent(id, name, raw) {
       restorePosition(savedPos);
       updateProgress();
       hideLoading();
+      const releaseRestoreLayout = () => {
+        document.querySelectorAll('#text-display .restore-layout').forEach(el => el.classList.remove('restore-layout'));
+      };
+      if ('requestIdleCallback' in window) requestIdleCallback(releaseRestoreLayout, { timeout: 900 });
+      else setTimeout(releaseRestoreLayout, 120);
     }));
   }
 
@@ -673,17 +716,17 @@ function curPct() {
   const total = document.documentElement.scrollHeight - window.innerHeight;
   return total > 0 ? Math.max(0, Math.min(100, Math.round(window.scrollY / total * 100))) : 0;
 }
-function curChapterTitle() {
-  if (!chapters.length) return '';
+function curChapterIndex() {
+  if (!chapters.length) return -1;
   const y = window.scrollY + topOffset();
-  let low = 0, high = chapters.length - 1, current = '';
+  let low = 0, high = chapters.length - 1, current = -1;
   while (low <= high) {
     const mid = (low + high) >> 1;
     const chapter = chapters[mid];
     const el = document.getElementById(chapter.pid);
     if (!el) { low = mid + 1; continue; }
     if (el.getBoundingClientRect().top + window.scrollY <= y) {
-      current = chapter.title;
+      current = mid;
       low = mid + 1;
     } else {
       high = mid - 1;
@@ -691,13 +734,36 @@ function curChapterTitle() {
   }
   return current;
 }
+function curChapterTitle() {
+  const index = curChapterIndex();
+  return index >= 0 ? chapters[index].title : '';
+}
+function updateChapterNav() {
+  const index = curChapterIndex();
+  const prev = document.getElementById('prev-chapter');
+  const next = document.getElementById('next-chapter');
+  if (prev) prev.disabled = !chapters.length || index <= 0;
+  if (next) next.disabled = !chapters.length || index >= chapters.length - 1;
+}
+function jumpChapter(delta) {
+  if (!chapters.length) return;
+  const current = curChapterIndex();
+  const target = delta < 0
+    ? Math.max(0, current <= 0 ? 0 : current - 1)
+    : Math.min(chapters.length - 1, current < 0 ? 0 : current + 1);
+  jumpTo(chapters[target].pid);
+}
 function updateProgress() {
   const total = document.documentElement.scrollHeight - window.innerHeight;
   const ratio = total > 0 ? Math.max(0, Math.min(1, window.scrollY / total)) : 0;
+  const pct = ratio * 100;
   document.getElementById('progress-bar').style.transform = 'scaleX(' + ratio + ')';
-  document.getElementById('reader-progress-fill').style.width = (ratio * 100) + '%';
-  setText('pct-now', Math.round(ratio * 100) + '%');
+  const slider = document.getElementById('reader-progress-slider');
+  if (slider && !progressDragging) slider.value = pct.toFixed(1);
+  if (slider) slider.style.setProperty('--progress', pct + '%');
+  setText('pct-now', Math.round(pct) + '%');
   setText('chapter-now', curChapterTitle());
+  updateChapterNav();
 }
 function saveScrollPos() {
   if (!curBook) return;
@@ -727,6 +793,29 @@ window.addEventListener('scroll', () => {
   clearTimeout(scrollSaveTimer);
   scrollSaveTimer = setTimeout(saveScrollPos, 350);
 }, { passive: true });
+
+const progressSlider = document.getElementById('reader-progress-slider');
+if (progressSlider) {
+  progressSlider.addEventListener('pointerdown', () => { progressDragging = true; });
+  progressSlider.addEventListener('input', e => {
+    progressDragging = true;
+    const pct = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+    e.target.style.setProperty('--progress', pct + '%');
+    setText('pct-now', Math.round(pct) + '%');
+  });
+  progressSlider.addEventListener('change', e => {
+    const pct = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+    const total = document.documentElement.scrollHeight - window.innerHeight;
+    window.scrollTo({ top: Math.max(0, total * pct / 100), behavior: 'auto' });
+    progressDragging = false;
+    updateProgress();
+    saveScrollPos();
+  });
+  progressSlider.addEventListener('pointerup', () => { progressDragging = false; });
+  progressSlider.addEventListener('pointercancel', () => { progressDragging = false; });
+}
+document.getElementById('prev-chapter').addEventListener('click', e => { e.stopPropagation(); jumpChapter(-1); });
+document.getElementById('next-chapter').addEventListener('click', e => { e.stopPropagation(); jumpChapter(1); });
 
 function saveNow() {
   clearTimeout(scrollSaveTimer);
@@ -868,6 +957,9 @@ document.querySelectorAll('[data-font]').forEach(button => button.addEventListen
 document.querySelectorAll('[data-weight]').forEach(button => button.addEventListener('click', () => {
   updateCfgKeepingPlace(() => { cfg.weight = Number(button.dataset.weight); });
 }));
+document.querySelectorAll('[data-wrap]').forEach(button => button.addEventListener('click', () => {
+  updateCfgKeepingPlace(() => { cfg.wrap = button.dataset.wrap; });
+}));
 document.querySelectorAll('[data-theme]').forEach(button => button.addEventListener('click', () => {
   updateCfgKeepingPlace(() => { cfg.theme = button.dataset.theme; });
 }));
@@ -901,11 +993,21 @@ document.getElementById('btn-home').addEventListener('click', () => {
 function showLoading(name) { setText('loading-msg', name + ' 불러오는 중...'); document.getElementById('loading').classList.add('show'); }
 function hideLoading() { document.getElementById('loading').classList.remove('show'); }
 
-/* ════════════════════ Service Worker ════════════════════ */
+/* ════════════════════ Storage + Service Worker ════════════════════ */
+async function requestPersistentStorage() {
+  try {
+    if (navigator.storage && navigator.storage.persist) await navigator.storage.persist();
+  } catch(e) {}
+}
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(registration => registration.update())
+      .catch(() => {});
+  });
 }
 
 /* ════════════════════ 초기화 ════════════════════ */
+requestPersistentStorage();
 applyCfg();
 renderLibrary();
